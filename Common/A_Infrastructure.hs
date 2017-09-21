@@ -21,9 +21,11 @@ run =
 
 fullParse :: IO ()
 fullParse =
-  do let day = runIdentity $ PARS.readFnc "day 2017 09 20"
-     print day
-     return ()
+  do case PARS.readFnc file of
+       Right f -> print $ PARS.genMovements f
+       Left err -> print err
+
+  where file = "month 2017 08\n day 19\n ex 1300 \"Laptop\"\"Personal\""
 
 
 
