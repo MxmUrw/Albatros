@@ -25,7 +25,7 @@ data Movement = Movement
   }
 
 instance Show Movement where
-    show (Movement d i) = show d ++ ": " ++ show (amount i) ++ " " ++ T.unpack (iLabel i) ++ "[" ++ T.unpack (tag i) ++ "]"
+    show (Movement d i) = show d ++ ": \t" ++ show (amount i) ++ " \t" ++ T.unpack (iLabel i) ++ " \t[" ++ T.unpack (tag i) ++ "]"
 
 data Item = Item
   {
@@ -54,7 +54,7 @@ readFnc = runIdentity . runParserT fnc1Parser () ""
 -- Parser
 
 fnc1Parser :: ParsecT String u Identity Fnc1
-fnc1Parser = symbol "month" *> (Fnc1 <$> integer <*> integer <*> many dayParser)
+fnc1Parser = whiteSpace *> symbol "month" *> (Fnc1 <$> integer <*> integer <*> many dayParser)
 
 dayParser :: ParsecT String u Identity (Int, [Item])
 dayParser = symbol "day" *> ((,) <$> integer <*> many itemParser)
@@ -62,8 +62,8 @@ dayParser = symbol "day" *> ((,) <$> integer <*> many itemParser)
 itemParser :: ParsecT String u Identity Item
 itemParser = (symbol "ex" *> ex) <|> (symbol "in" *> inc)
 
-  where ex = Item <$> (((-1) *) <$> integer) <*> stringLiteral <*> stringLiteral
-        inc = Item <$> integer <*> stringLiteral <*> stringLiteral
+  where ex = Item <$> (((-1) *) <$> monetaryValue) <*> stringLiteral <*> stringLiteral
+        inc = Item <$> monetaryValue <*> stringLiteral <*> stringLiteral
 
 
 
@@ -80,3 +80,12 @@ symbol = P.symbol lexer
 
 stringLiteral :: ParsecT String u Identity T.Text
 stringLiteral = T.pack <$> P.stringLiteral lexer
+
+monetaryValue :: ParsecT String u Identity Int
+monetaryValue = combine <$> P.naturalOrFloat lexer
+  where
+    combine (Left i) = fromIntegral i
+    combine (Right r) = round r
+
+whiteSpace :: ParsecT String u Identity ()
+whiteSpace = P.whiteSpace lexer
