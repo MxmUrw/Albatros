@@ -3,10 +3,11 @@ module B_Parser
   (
       Movement(..),
       Item(..),
-      Movement(..),
+      Fnc1(..),
+      Value(..),
       item,
       date,
-      amount,
+      value,
       readFnc,
       genMovements
   )
@@ -29,25 +30,12 @@ import Data.Time.Calendar
 ---------------------------------------------------------------------
 ------ Data ------
 
--- data Date = Date Int Int Int
---   deriving (Eq)
-
--- instance Show Date where
---     show (Date y m d) = show y ++ "-"
---                         ++ show m ++ "-"
---                         ++ show d
-
--- instance Ord Date where
---     (Date y1 m1 d1) <= (Date y2 m2 d2) = years
---       where
---         years  = y1 < y2 || (y1 == y2 && months)
---         months = m1 < m2 || (m1 == m2 && days)
---         days   = d1 <= d2
-
+data Value = Absolute Int | Relative Int
+  deriving (Show)
 
 data Item = Item
   {
-      _amount :: Int,
+      _value :: Value,
       _iLabel :: T.Text,
       _tag :: T.Text
   }
@@ -62,27 +50,48 @@ makeLenses ''Movement
 
 instance Show Movement where
     show (Movement d i) = show d ++ ": \t"
-                          ++ show (_amount i) ++ " \t"
+                          ++ show (_value i) ++ " \t"
                           ++ T.unpack (_iLabel i) ++ " \t["
                           ++ T.unpack (_tag i) ++ "]"
 
 
 
+-- with format (Month y m [day, items])
+--          or [Recurrent item y1 m1 y2 m2]
+data Fnc1 = FncMonth YearMonth [(Int, [Item])] | FncRec [Recurrent]
 
+data Recurrent = Recurrent Item YearMonth YearMonth
 
+data YearMonth = YearMonth Int Int
+  deriving (Eq)
 
-
-data Fnc1 = Fnc1 Int Int [(Int, [Item])]
+instance Ord YearMonth where
+    (YearMonth y1 m1) <= (YearMonth y2 m2) = y1 < y2 || (y1 == y2 && m1 <= m2)
 
 ---------------------------------------------------------------------
 ------ Functions ------
 -- top level
 genMovements :: Fnc1 -> [Movement]
-genMovements (Fnc1 y m ds) = join $ foldl (\xs b -> travDay b : xs) [] ds
-  where travDay (d, items) = Movement (mkDate y m d) <$> items
+genMovements (FncMonth ym ds) = join $ foldl (\xs b -> travDay b : xs) [] ds
+  where
+    travDay (d, items) = Movement (mkDate ym d) <$> items
+genMovements (FncRec recs) = genRec =<< recs
+  where
+    genRec (Recurrent i ym1 ym2) = flip Movement i <$> enumMonthly ym1 ym2
 
-mkDate yyyy mm dd =
-  LocalTime (fromGregorian (fromIntegral yyyy) mm dd) midnight
+enumMonthly :: YearMonth -> YearMonth -> [LocalTime]
+enumMonthly ym1 ym2
+  | ym1 < ym2 = mkDate ym1 1 : enumMonthly (nextYM ym1) ym2
+  | otherwise = []
+
+nextYM :: YearMonth -> YearMonth
+nextYM (YearMonth y 12) = YearMonth (y+1) 1
+nextYM (YearMonth y m) = YearMonth y (m+1)
+
+mkDate (YearMonth y m) d =
+  LocalTime (fromGregorian (fromIntegral y) m d) midnight
+
+
 
 
 readFnc :: String -> Either ParseError Fnc1
@@ -90,17 +99,42 @@ readFnc = runIdentity . runParserT fnc1Parser () ""
 
 
 -- parser
-fnc1Parser :: ParsecT String u Identity Fnc1
-fnc1Parser = whiteSpace *> symbol "month" *> (Fnc1 <$> integer <*> integer <*> many dayParser)
 
-dayParser :: ParsecT String u Identity (Int, [Item])
-dayParser = symbol "day" *> ((,) <$> integer <*> many itemParser)
+fnc1Parser :: ParsecT String u Identity Fnc1
+fnc1Parser =
+  whiteSpace *> (month <|> recurrent)
+  where
+    month =
+      symbol "month" *>
+      (FncMonth <$> yearMonthParser <*> many dayTreeParser)
+    recurrent=
+      (FncRec <$> many recurrentParser)
+
+yearMonthParser :: ParsecT String u Identity YearMonth
+yearMonthParser = YearMonth <$> integer <* symbol "-" <*> integer
+
+recurrentParser :: ParsecT String u Identity Recurrent
+recurrentParser =
+  symbol "recurrent" *> recurrent
+  where
+    recurrent = Recurrent
+                <$> parens itemParser
+                <* symbol "from"
+                <*> yearMonthParser
+                <* symbol "till"
+                <*> yearMonthParser
+
+dayTreeParser :: ParsecT String u Identity (Int, [Item])
+dayTreeParser = symbol "day" *> ((,) <$> integer <*> many itemParser)
 
 itemParser :: ParsecT String u Identity Item
-itemParser = (symbol "ex" *> ex) <|> (symbol "in" *> inc)
-
-  where ex = Item <$> (((-1) *) <$> monetaryValue) <*> stringLiteral <*> stringLiteral
-        inc = Item <$> monetaryValue <*> stringLiteral <*> stringLiteral
+itemParser =
+  (symbol "ex" *> ex)
+  <|> (symbol "in" *> inc)
+  <|> (symbol "check" *> check)
+  where ex = Item <$> (Relative <$> ((-1) *) <$> monetaryValue) <*> stringLiteral <*> stringLiteral
+        inc = Item <$> (Relative <$> monetaryValue) <*> stringLiteral <*> stringLiteral
+        check = Item <$> Absolute <$> monetaryValue <*> pure "correction" <*> pure "correction"
 
 
 
@@ -113,6 +147,9 @@ integer = fromIntegral <$> P.integer lexer
 
 symbol :: String -> ParsecT String u Identity String
 symbol = P.symbol lexer
+
+parens :: ParsecT String u Identity a -> ParsecT String u Identity a
+parens = P.parens lexer
 
 stringLiteral :: ParsecT String u Identity T.Text
 stringLiteral = T.pack <$> P.stringLiteral lexer

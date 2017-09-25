@@ -20,26 +20,46 @@ import Data.Ord
 import Data.List
 import Data.Time.LocalTime
 import Data.Traversable
+import Data.Default
 
+---------------------------------------
+------ Data ------
+data Stats = Stats
+  {
+      _current :: Int,
+      _corrected :: Int
+  }
+  deriving (Show)
+
+instance Default Stats where
+    def = Stats 0 0
+
+makeLenses ''Stats
+
+
+---------------------------------------
+------ Functions ------
 run :: IO ()
 run =
-  do cmd <- CLI.parse
-     case cmd of
-        CLI.Full -> genParse
-        CLI.Monthly -> return ()
-
-genParse :: IO ()
-genParse =
   do
       CONF.Configuration {CONF.path = root} <- CONF.readConf
-      pipeline (unpack root)
+      cmd <- CLI.parse
+
+      let r = case cmd of
+                CLI.Full -> renderFull
+                CLI.Monthly -> fail "not implemented"
+
+      stats <- pipeline r (unpack root)
+
+      print stats
+
 
   where
-      pipeline =
+      pipeline renderer =
             FILE.findFnc1
             >=> mapM readFile
             >=> return . fmap PARS.readFnc
-            >=> handleError putError render
+            >=> handleError putError renderer
 
       handleError f g x =
         do
@@ -53,19 +73,37 @@ genParse =
               putStrLn "Error:"
               print e
 
-      render fncs =
-        do
-            let movs = PARS.genMovements =<< fncs
-            let sortedMovs = sortBy (comparing PARS._date) movs
-            REND.draw (prepareFull sortedMovs)
+      -- render fncs =
+      --   do
+      --       let movs = PARS.genMovements =<< fncs
+      --       let sortedMovs = sortBy (comparing PARS._date) movs
+      --       REND.draw (prepareFull sortedMovs)
 
-prepareFull :: [PARS.Movement] -> [(LocalTime,Int)]
-prepareFull = snd . mapAccumL f 0
+-- prepareFull :: [PARS.Movement] -> [(LocalTime,Int)]
+-- prepareFull = snd . mapAccumL f 0
+--   where
+--     f acc m = (acc + amount, (date, acc + amount))
+--       where
+
+renderFull :: [PARS.Fnc1] -> IO Stats
+renderFull fncs =
+  do
+      let movs = PARS.genMovements =<< fncs
+      let sortedMovs = sortBy (comparing PARS._date) movs
+      let (stats,vals) = mapAccumL delta def sortedMovs
+      REND.draw vals
+      return stats
   where
-    f acc m = (acc + amount, (date, acc + amount))
-      where
-        date = m^.PARS.date
-        amount = m^.PARS.item.PARS.amount
+      delta stats mov
+        | PARS.Absolute v <- value =
+              (stats & current.~v & corrected+~(abs (stats^.current - v)),
+               (date, v))
+        | PARS.Relative v <- value =
+              (stats & current+~v, (date, stats^.current + v))
+        where
+          date = mov^.PARS.date
+          value = mov^.PARS.item.PARS.value
+
 
 
 -- dateToNum :: PARS.Date -> LocalTime
