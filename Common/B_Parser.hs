@@ -2,57 +2,94 @@
 module B_Parser
   (
       Movement(..),
+      Item(..),
+      Movement(..),
+      item,
+      date,
+      amount,
       readFnc,
       genMovements
   )
   where
 
+---------------------------------------------------------------------
+------ Imports ------
 import Text.Parsec
-import qualified Text.Parsec.Token as P
 import Text.Parsec.Language (haskellStyle)
+import qualified Text.Parsec.Token as P
 
-import Data.Functor.Identity
-
-import qualified Data.Text as T
-
+import Control.Lens
 import Control.Monad
+import Data.Functor.Identity
+import qualified Data.Text as T
+import Data.Time.LocalTime
+import Data.Time.Calendar
 
 
-data Movement = Movement
-  {
-      date :: Date,
-      item :: Item
-  }
+---------------------------------------------------------------------
+------ Data ------
 
-instance Show Movement where
-    show (Movement d i) = show d ++ ": \t" ++ show (amount i) ++ " \t" ++ T.unpack (iLabel i) ++ " \t[" ++ T.unpack (tag i) ++ "]"
+-- data Date = Date Int Int Int
+--   deriving (Eq)
+
+-- instance Show Date where
+--     show (Date y m d) = show y ++ "-"
+--                         ++ show m ++ "-"
+--                         ++ show d
+
+-- instance Ord Date where
+--     (Date y1 m1 d1) <= (Date y2 m2 d2) = years
+--       where
+--         years  = y1 < y2 || (y1 == y2 && months)
+--         months = m1 < m2 || (m1 == m2 && days)
+--         days   = d1 <= d2
+
 
 data Item = Item
   {
-      amount :: Int,
-      iLabel :: T.Text,
-      tag :: T.Text
+      _amount :: Int,
+      _iLabel :: T.Text,
+      _tag :: T.Text
   }
+makeLenses ''Item
+
+data Movement = Movement
+  {
+      _date :: LocalTime,
+      _item :: Item
+  }
+makeLenses ''Movement
+
+instance Show Movement where
+    show (Movement d i) = show d ++ ": \t"
+                          ++ show (_amount i) ++ " \t"
+                          ++ T.unpack (_iLabel i) ++ " \t["
+                          ++ T.unpack (_tag i) ++ "]"
 
 
-data Date = Date Int Int Int
 
-instance Show Date where
-    show (Date y m d) = show y ++ "-" ++ show m ++ "-" ++ show d
+
+
+
 
 data Fnc1 = Fnc1 Int Int [(Int, [Item])]
 
+---------------------------------------------------------------------
+------ Functions ------
+-- top level
 genMovements :: Fnc1 -> [Movement]
 genMovements (Fnc1 y m ds) = join $ foldl (\xs b -> travDay b : xs) [] ds
-  where travDay (d, items) = Movement (Date y m d) <$> items
+  where travDay (d, items) = Movement (mkDate y m d) <$> items
+
+mkDate yyyy mm dd =
+  LocalTime (fromGregorian (fromIntegral yyyy) mm dd) midnight
 
 
 readFnc :: String -> Either ParseError Fnc1
 readFnc = runIdentity . runParserT fnc1Parser () ""
 
 
--- Parser
-
+-- parser
 fnc1Parser :: ParsecT String u Identity Fnc1
 fnc1Parser = whiteSpace *> symbol "month" *> (Fnc1 <$> integer <*> integer <*> many dayParser)
 
@@ -67,8 +104,7 @@ itemParser = (symbol "ex" *> ex) <|> (symbol "in" *> inc)
 
 
 
--- Lexer
-
+-- lexer
 lexer :: P.GenTokenParser String u Identity
 lexer = P.makeTokenParser haskellStyle
 
