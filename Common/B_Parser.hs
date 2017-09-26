@@ -5,6 +5,7 @@ module B_Parser
       Item(..),
       Fnc1(..),
       Value(..),
+      Account(..),
       item,
       date,
       value,
@@ -30,12 +31,19 @@ import Data.Time.Calendar
 ---------------------------------------------------------------------
 ------ Data ------
 
+class Config c where
+    getDefaultAccount :: c -> String
+    getAccounts :: c -> [String]
+
+newtype Account = Account { name :: String}
+
 data Value = Absolute Int | Relative Int
   deriving (Show)
 
 data Item = Item
   {
       _value :: Value,
+      _account :: Account,
       _iLabel :: T.Text,
       _tag :: T.Text
   }
@@ -71,6 +79,11 @@ instance Ord YearMonth where
 ---------------------------------------------------------------------
 ------ Functions ------
 -- top level
+
+readFnc :: Config c => c -> String -> String -> Either ParseError Fnc1
+readFnc c name file = runIdentity $ runParserT fnc1Parser c name file
+
+
 genMovements :: Fnc1 -> [Movement]
 genMovements (FncMonth ym ds) = join $ foldl (\xs b -> travDay b : xs) [] ds
   where
@@ -94,13 +107,10 @@ mkDate (YearMonth y m) d =
 
 
 
-readFnc :: String -> Either ParseError Fnc1
-readFnc = runIdentity . runParserT fnc1Parser () ""
-
 
 -- parser
 
-fnc1Parser :: ParsecT String u Identity Fnc1
+fnc1Parser :: Config c => ParsecT String c Identity Fnc1
 fnc1Parser =
   whiteSpace *> (month <|> recurrent)
   where
@@ -113,7 +123,7 @@ fnc1Parser =
 yearMonthParser :: ParsecT String u Identity YearMonth
 yearMonthParser = YearMonth <$> integer <* symbol "-" <*> integer
 
-recurrentParser :: ParsecT String u Identity Recurrent
+recurrentParser :: Config c => ParsecT String c Identity Recurrent
 recurrentParser =
   symbol "recurrent" *> recurrent
   where
@@ -124,18 +134,37 @@ recurrentParser =
                 <* symbol "till"
                 <*> yearMonthParser
 
-dayTreeParser :: ParsecT String u Identity (Int, [Item])
+dayTreeParser :: Config c => ParsecT String c Identity (Int, [Item])
 dayTreeParser = symbol "day" *> ((,) <$> integer <*> many itemParser)
 
-itemParser :: ParsecT String u Identity Item
+itemParser :: Config c => ParsecT String c Identity Item
 itemParser =
   (symbol "ex" *> ex)
   <|> (symbol "in" *> inc)
   <|> (symbol "check" *> check)
-  where ex = Item <$> (Relative <$> ((-1) *) <$> monetaryValue) <*> stringLiteral <*> stringLiteral
-        inc = Item <$> (Relative <$> monetaryValue) <*> stringLiteral <*> stringLiteral
-        check = Item <$> Absolute <$> monetaryValue <*> pure "correction" <*> pure "correction"
+  where ex = Item
+          <$> (Relative <$> ((-1) *) <$> monetaryValue)
+          <*> accountParser
+          <*> stringLiteral
+          <*> stringLiteral
+        inc = Item
+          <$> (Relative <$> monetaryValue)
+          <*> accountParser
+          <*> stringLiteral
+          <*> stringLiteral
+        check = Item
+          <$> (Absolute <$> monetaryValue)
+          <*> accountParser
+          <*> pure "correction"
+          <*> pure "correction"
 
+accountParser :: Config c => ParsecT String c Identity Account
+accountParser =
+  do
+      config <- getState
+      let def      = getDefaultAccount config
+      let explicit = angles <$> symbol <$> getAccounts config
+      Account <$> def `option` choice explicit
 
 
 -- lexer
@@ -150,6 +179,12 @@ symbol = P.symbol lexer
 
 parens :: ParsecT String u Identity a -> ParsecT String u Identity a
 parens = P.parens lexer
+
+angles :: ParsecT String u Identity a -> ParsecT String u Identity a
+angles = P.angles lexer
+
+identifier :: ParsecT String u Identity String
+identifier = P.identifier lexer
 
 stringLiteral :: ParsecT String u Identity T.Text
 stringLiteral = T.pack <$> P.stringLiteral lexer

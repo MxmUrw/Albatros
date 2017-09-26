@@ -42,14 +42,14 @@ makeLenses ''Stats
 run :: IO ()
 run =
   do
-      CONF.Configuration {CONF.path = root} <- CONF.readConf
+      conf <- CONF.readConf
       cmd <- CLI.parse
 
       let r = case cmd of
                 CLI.Full -> renderFull
                 CLI.Monthly -> fail "not implemented"
 
-      stats <- pipeline r (unpack root)
+      stats <- pipeline r (unpack $ conf^.CONF.path)
 
       print stats
 
@@ -115,7 +115,7 @@ renderFull fncs =
 fullParse :: IO ()
 fullParse =
   do
-      CONF.Configuration {CONF.path = root} <- CONF.readConf
+      CONF.Configuration {CONF._path = root} <- CONF.readConf
 
       mapM_ printFnc =<< return . fmap (PARS.readFnc) =<< mapM readFile =<< FILE.findFnc1 (unpack root)
 
