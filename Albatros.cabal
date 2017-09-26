@@ -33,6 +33,7 @@ library
                      , lens
                      , time
                      , data-default
+                     , fraction
   default-language:    Haskell2010
   default-extensions:  OverloadedStrings
                      , DeriveGeneric

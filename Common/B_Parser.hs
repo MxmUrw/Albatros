@@ -6,6 +6,7 @@ module B_Parser
       Fnc1(..),
       Value(..),
       Account(..),
+      Config(..),
       item,
       date,
       value,
@@ -26,6 +27,7 @@ import Data.Functor.Identity
 import qualified Data.Text as T
 import Data.Time.LocalTime
 import Data.Time.Calendar
+import Data.Fraction
 
 
 ---------------------------------------------------------------------
@@ -33,17 +35,20 @@ import Data.Time.Calendar
 
 class Config c where
     getDefaultAccount :: c -> String
+    getWorldAccount :: c -> String
     getAccounts :: c -> [String]
 
 newtype Account = Account { name :: String}
 
 data Value = Absolute Int | Relative Int
   deriving (Show)
+makePrisms ''Value
 
 data Item = Item
   {
       _value :: Value,
-      _account :: Account,
+      _source :: Account,
+      _target :: Account,
       _iLabel :: T.Text,
       _tag :: T.Text
   }
@@ -66,9 +71,14 @@ instance Show Movement where
 
 -- with format (Month y m [day, items])
 --          or [Recurrent item y1 m1 y2 m2]
-data Fnc1 = FncMonth YearMonth [(Int, [Item])] | FncRec [Recurrent]
+data Fnc1 = FncMonth YearMonth [(Int, [ExItem])] | FncRec [Recurrent]
 
-data Recurrent = Recurrent Item YearMonth YearMonth
+data ExItem = ExItem Item (Maybe Split)
+data Split = Split Fraction Direction Account
+
+data Direction = From | To
+
+data Recurrent = Recurrent ExItem YearMonth YearMonth
 
 data YearMonth = YearMonth Int Int
   deriving (Eq)
@@ -80,17 +90,40 @@ instance Ord YearMonth where
 ------ Functions ------
 -- top level
 
-readFnc :: Config c => c -> String -> String -> Either ParseError Fnc1
-readFnc c name file = runIdentity $ runParserT fnc1Parser c name file
+readFnc :: Config c => c -> (String, String) -> Either ParseError Fnc1
+readFnc c (name,file) = runIdentity $ runParserT fnc1Parser c name file
 
 
 genMovements :: Fnc1 -> [Movement]
-genMovements (FncMonth ym ds) = join $ foldl (\xs b -> travDay b : xs) [] ds
+genMovements (FncMonth ym days) = travDay =<< days
   where
-    travDay (d, items) = Movement (mkDate ym d) <$> items
+    travDay (d, items) = Movement (mkDate ym d) <$> (breakExItem =<< items)
+-- genMovements (FncMonth ym days) = join $ foldl (\xs b -> travDay b : xs) [] ds
+--   where
+--     travDay (d, items) = Movement (mkDate ym d) <$> items
 genMovements (FncRec recs) = genRec =<< recs
   where
-    genRec (Recurrent i ym1 ym2) = flip Movement i <$> enumMonthly ym1 ym2
+    genRec (Recurrent i ym1 ym2) = Movement <$> enumMonthly ym1 ym2 <*> breakExItem i
+
+
+
+breakExItem :: ExItem -> [Item]
+breakExItem (ExItem item Nothing) = pure item
+breakExItem (ExItem item (Just (Split p dir acc))) =
+  [
+      item & value._Relative %~ reverseFrac p,
+      item & value._Relative %~ applyFrac p & splitAcc dir .~ acc
+  ]
+  where
+    reverseFrac :: Fraction -> Int -> Int
+    reverseFrac p v = round $ (fromIntegral v) * (1.0-(toPercentage p))
+
+    applyFrac :: Fraction -> Int -> Int
+    applyFrac p v = round $ (fromIntegral v) * (toPercentage p)
+
+    splitAcc From = source
+    splitAcc To = target
+
 
 enumMonthly :: YearMonth -> YearMonth -> [LocalTime]
 enumMonthly ym1 ym2
@@ -128,42 +161,64 @@ recurrentParser =
   symbol "recurrent" *> recurrent
   where
     recurrent = Recurrent
-                <$> parens itemParser
+                <$> parens exItemParser
                 <* symbol "from"
                 <*> yearMonthParser
                 <* symbol "till"
                 <*> yearMonthParser
 
-dayTreeParser :: Config c => ParsecT String c Identity (Int, [Item])
-dayTreeParser = symbol "day" *> ((,) <$> integer <*> many itemParser)
+dayTreeParser :: Config c => ParsecT String c Identity (Int, [ExItem])
+dayTreeParser = symbol "day" *> ((,) <$> integer <*> many exItemParser)
+
+exItemParser :: Config c => ParsecT String c Identity ExItem
+exItemParser =
+  do
+      item <- itemParser
+      option (ExItem item Nothing) (ExItem item . Just <$> brackets split)
+  where
+      split = symbol "split" *> (Split <$> percentage <*> direction <*> accountParser)
+      direction = (symbol "from" *> pure From) <|> (symbol "to" *> pure To)
+
 
 itemParser :: Config c => ParsecT String c Identity Item
 itemParser =
   (symbol "ex" *> ex)
   <|> (symbol "in" *> inc)
   <|> (symbol "check" *> check)
+  <|> (symbol "move" *> move)
   where ex = Item
-          <$> (Relative <$> ((-1) *) <$> monetaryValue)
+          <$> (Relative <$> monetaryValue)
           <*> accountParser
+          <*> (Account . getWorldAccount <$> getState)
           <*> stringLiteral
           <*> stringLiteral
         inc = Item
           <$> (Relative <$> monetaryValue)
+          <*> (Account . getWorldAccount <$> getState)
           <*> accountParser
           <*> stringLiteral
           <*> stringLiteral
         check = Item
           <$> (Absolute <$> monetaryValue)
+          <*> (Account . getWorldAccount <$> getState)
           <*> accountParser
           <*> pure "correction"
           <*> pure "correction"
+        move = Item
+          <$> (Relative <$> monetaryValue)
+          <*> accountParser
+          <* symbol "to"
+          <*> accountParser
+          <*> pure "move"
+          <*> pure "move"
+
 
 accountParser :: Config c => ParsecT String c Identity Account
 accountParser =
   do
       config <- getState
       let def      = getDefaultAccount config
-      let explicit = angles <$> symbol <$> getAccounts config
+      let explicit = try <$> angles <$> symbol <$> getAccounts config
       Account <$> def `option` choice explicit
 
 
@@ -174,11 +229,17 @@ lexer = P.makeTokenParser haskellStyle
 integer :: ParsecT String u Identity Int
 integer = fromIntegral <$> P.integer lexer
 
+percentage :: ParsecT String u Identity Fraction
+percentage = fromPercentage <$> try (integer <* symbol "%")
+
 symbol :: String -> ParsecT String u Identity String
 symbol = P.symbol lexer
 
 parens :: ParsecT String u Identity a -> ParsecT String u Identity a
 parens = P.parens lexer
+
+brackets :: ParsecT String u Identity a -> ParsecT String u Identity a
+brackets = P.brackets lexer
 
 angles :: ParsecT String u Identity a -> ParsecT String u Identity a
 angles = P.angles lexer

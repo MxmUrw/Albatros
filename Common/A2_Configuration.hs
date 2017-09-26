@@ -16,6 +16,7 @@ import Dhall
 data Accounts = Accounts
   {
       _main :: Text,
+      _world :: Text,
       _others :: [Text]
   }
   deriving (Generic, Show)

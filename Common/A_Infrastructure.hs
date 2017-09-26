@@ -37,6 +37,15 @@ instance Default Stats where
 makeLenses ''Stats
 
 
+instance PARS.Config CONF.Accounts where
+    getDefaultAccount = unpack . CONF._main
+    getWorldAccount = unpack . CONF._world
+    getAccounts c =
+      PARS.getDefaultAccount c
+      : PARS.getWorldAccount c
+      : fmap unpack (CONF._others c)
+
+
 ---------------------------------------
 ------ Functions ------
 run :: IO ()
@@ -49,17 +58,23 @@ run =
                 CLI.Full -> renderFull
                 CLI.Monthly -> fail "not implemented"
 
-      stats <- pipeline r (unpack $ conf^.CONF.path)
+      stats <- pipeline r conf
 
       print stats
 
 
   where
-      pipeline renderer =
-            FILE.findFnc1
-            >=> mapM readFile
-            >=> return . fmap PARS.readFnc
-            >=> handleError putError renderer
+      pipeline renderer conf =
+        do
+            files <- FILE.findFnc1 (unpack $ conf^.CONF.path)
+            conts <- mapM readContents files
+            let fncs = PARS.readFnc (conf^.CONF.accounts) <$> conts
+            handleError putError renderer fncs
+
+      readContents path =
+        do
+            contents <- readFile path
+            return (path,contents)
 
       handleError f g x =
         do
@@ -106,38 +121,36 @@ renderFull fncs =
 
 
 
--- dateToNum :: PARS.Date -> LocalTime
--- dateToNum (PARS.Date y m d) = y 
 
 
 
 
-fullParse :: IO ()
-fullParse =
-  do
-      CONF.Configuration {CONF._path = root} <- CONF.readConf
+-- fullParse :: IO ()
+-- fullParse =
+--   do
+--       CONF.Configuration {CONF._path = root} <- CONF.readConf
 
-      mapM_ printFnc =<< return . fmap (PARS.readFnc) =<< mapM readFile =<< FILE.findFnc1 (unpack root)
+--       mapM_ printFnc =<< return . fmap (PARS.readFnc) =<< mapM readFile =<< FILE.findFnc1 (unpack root)
 
-  where printFnc (Left e) =
-          do
-              putStrLn "------"
-              putStrLn "Error:"
-              print e
-        printFnc (Right f) =
-          do
-              putStrLn "------"
-              mapM_ print $ PARS.genMovements f
+--   where printFnc (Left e) =
+--           do
+--               putStrLn "------"
+--               putStrLn "Error:"
+--               print e
+--         printFnc (Right f) =
+--           do
+--               putStrLn "------"
+--               mapM_ print $ PARS.genMovements f
 
 
 
-testParse :: IO ()
-testParse =
-  do case PARS.readFnc file of
-       Right f -> print $ PARS.genMovements f
-       Left err -> print err
+-- testParse :: IO ()
+-- testParse =
+--   do case PARS.readFnc file of
+--        Right f -> print $ PARS.genMovements f
+--        Left err -> print err
 
-  where file = "month 2017 08\n day 19\n ex 1300 \"Laptop\"\"Personal\""
+--   where file = "month 2017 08\n day 19\n ex 1300 \"Laptop\"\"Personal\""
 
 
 
