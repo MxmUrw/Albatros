@@ -1,17 +1,22 @@
 
 module B_Parser
   (
+      item,
+      date,
+      value,
+      readFnc,
+      genMovements,
+      addCharges,
+      symbol,
       Movement(..),
       Item(..),
       Fnc1(..),
       Value(..),
       Account(..),
       Config(..),
-      item,
-      date,
-      value,
-      readFnc,
-      genMovements
+      YearMonth(..), mkDate,
+      yearMonthParser,
+      Charge(..), cAccount, cDate, cAmount
   )
   where
 
@@ -27,7 +32,8 @@ import Data.Functor.Identity
 import qualified Data.Text as T
 import Data.Time.LocalTime
 import Data.Time.Calendar
-import Data.Fraction
+-- import Data.Percentage
+import qualified Data.Map.Strict as Map
 
 
 ---------------------------------------------------------------------
@@ -39,6 +45,9 @@ class Config c where
     getAccounts :: c -> [String]
 
 newtype Account = Account { name :: String}
+  deriving (Eq, Ord)
+instance Show Account where
+    show (Account s) = "<" ++ s ++ ">"
 
 data Value = Absolute Int | Relative Int
   deriving (Show)
@@ -67,14 +76,25 @@ instance Show Movement where
                           ++ T.unpack (_iLabel i) ++ " \t["
                           ++ T.unpack (_tag i) ++ "]"
 
+data Charge = Charge
+  {
+      _cDate :: LocalTime,
+      _cAmount :: Value,
+      _cAccount :: Account,
+      _cLabel :: T.Text,
+      _cTag :: T.Text
+  }
+makeLenses ''Charge
 
 
+
+type Percentage = Int
 -- with format (Month y m [day, items])
 --          or [Recurrent item y1 m1 y2 m2]
 data Fnc1 = FncMonth YearMonth [(Int, [ExItem])] | FncRec [Recurrent]
 
 data ExItem = ExItem Item (Maybe Split)
-data Split = Split Fraction Direction Account
+data Split = Split Percentage Direction Account
 
 data Direction = From | To
 
@@ -106,6 +126,19 @@ genMovements (FncRec recs) = genRec =<< recs
     genRec (Recurrent i ym1 ym2) = Movement <$> enumMonthly ym1 ym2 <*> breakExItem i
 
 
+addCharges :: Movement -> Map.Map Account [Charge] -> Map.Map Account [Charge]
+addCharges
+  (Movement date (Item value source target label tag))
+  =
+    Map.insertWith (++) target [mkCharge value target]
+    . Map.insertWith (++) source [mkCharge (negate value) source]
+  where
+    mkCharge v a = Charge date v a label tag
+    negate v = v & _Relative *~ (-1)
+
+
+
+
 
 breakExItem :: ExItem -> [Item]
 breakExItem (ExItem item Nothing) = pure item
@@ -115,11 +148,11 @@ breakExItem (ExItem item (Just (Split p dir acc))) =
       item & value._Relative %~ applyFrac p & splitAcc dir .~ acc
   ]
   where
-    reverseFrac :: Fraction -> Int -> Int
-    reverseFrac p v = round $ (fromIntegral v) * (1.0-(toPercentage p))
+    reverseFrac :: Percentage -> Int -> Int
+    reverseFrac p v = v - applyFrac p v
 
-    applyFrac :: Fraction -> Int -> Int
-    applyFrac p v = round $ (fromIntegral v) * (toPercentage p)
+    applyFrac :: Percentage -> Int -> Int
+    applyFrac p v = v * p `div` 100
 
     splitAcc From = source
     splitAcc To = target
@@ -229,8 +262,8 @@ lexer = P.makeTokenParser haskellStyle
 integer :: ParsecT String u Identity Int
 integer = fromIntegral <$> P.integer lexer
 
-percentage :: ParsecT String u Identity Fraction
-percentage = fromPercentage <$> try (integer <* symbol "%")
+percentage :: ParsecT String u Identity Percentage
+percentage = fromIntegral <$> try (integer <* symbol "%")
 
 symbol :: String -> ParsecT String u Identity String
 symbol = P.symbol lexer

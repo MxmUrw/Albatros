@@ -1,7 +1,9 @@
 
 module A_Infrastructure
   (
-      run
+      run,
+      renderFull,
+      prettyMap
   )
   where
 
@@ -12,6 +14,8 @@ import qualified B_Parser as PARS
 import qualified C_Renderer as REND
 
 -- import Data.Functor.Identity
+import qualified Data.Map.Strict as Map
+
 import Control.Monad
 import Control.Lens
 import Data.Text.Lazy (pack, unpack, Text)
@@ -21,6 +25,7 @@ import Data.List
 import Data.Time.LocalTime
 import Data.Traversable
 import Data.Default
+import Data.Text.Prettyprint.Doc
 
 ---------------------------------------
 ------ Data ------
@@ -48,19 +53,18 @@ instance PARS.Config CONF.Accounts where
 
 ---------------------------------------
 ------ Functions ------
+
 run :: IO ()
 run =
   do
       conf <- CONF.readConf
-      cmd <- CLI.parse
+      args <- CLI.parse
 
-      let r = case cmd of
-                CLI.Full -> renderFull
-                CLI.Monthly -> fail "not implemented"
+      let r = renderFull args
 
       stats <- pipeline r conf
 
-      print stats
+      print $ prettyMap stats
 
 
   where
@@ -100,15 +104,38 @@ run =
 --     f acc m = (acc + amount, (date, acc + amount))
 --       where
 
-renderFull :: [PARS.Fnc1] -> IO Stats
-renderFull fncs =
+renderFull :: CLI.Args -> [PARS.Fnc1] -> IO (Map.Map PARS.Account Stats)
+renderFull args fncs =
   do
-      let movs = PARS.genMovements =<< fncs
-      let sortedMovs = sortBy (comparing PARS._date) movs
-      let (stats,vals) = mapAccumL delta def sortedMovs
-      REND.draw vals
-      return stats
+
+      --- time filter
+      currentTime <- zonedTimeToLocalTime <$> getZonedTime
+
+      let timeBeginFilter mov
+            = case CLI.begin args of
+                CLI.TimeNone         -> True
+                CLI.TimeNow          -> mov^.PARS.date >= currentTime
+                CLI.TimeYearMonth ym -> mov^.PARS.date >= PARS.mkDate ym 1
+
+      let timeEndFilter mov
+            = case CLI.end args of
+                CLI.TimeNone         -> True
+                CLI.TimeNow          -> mov^.PARS.date <= currentTime
+                CLI.TimeYearMonth ym -> mov^.PARS.date <= PARS.mkDate ym 31
+
+
+      --- actions
+
+      let movs = filter (\m -> timeBeginFilter m && timeEndFilter m) <$> PARS.genMovements =<< fncs
+      let chrgs = foldl (flip PARS.addCharges) Map.empty movs
+
+      let sortedMovs = sortBy (comparing PARS._cDate) <$> chrgs
+      let statVals = mapAccumL delta def <$> sortedMovs
+
+      Map.traverseWithKey draw statVals
+
   where
+
       delta stats mov
         | PARS.Absolute v <- value =
               (stats & current.~v & corrected+~(abs (stats^.current - v)),
@@ -116,11 +143,29 @@ renderFull fncs =
         | PARS.Relative v <- value =
               (stats & current+~v, (date, stats^.current + v))
         where
-          date = mov^.PARS.date
-          value = mov^.PARS.item.PARS.value
+          date = mov^.PARS.cDate
+          value = mov^.PARS.cAmount
+
+      draw acc (stats,vals) = REND.draw (PARS.name acc) vals >> return stats
+
+                          
 
 
 
+
+
+prettyMap :: Map.Map PARS.Account Stats -> Doc ()
+prettyMap map = vsep $ single <$> Map.toList map
+  where
+    single (acc,stats) = pretty (show acc) <> line <> indent 4 (prettyStats stats)
+
+prettyStats :: Stats -> Doc ()
+prettyStats stats = vsep
+                    [
+                        "balance:" <+> pretty (stats^.current),
+                        "corrections:" <+> pretty (stats^.corrected)
+                    ]
+                    <> line
 
 
 

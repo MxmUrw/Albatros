@@ -10,7 +10,7 @@ import Graphics.Rendering.Chart.Backend.Diagrams
 
 
 -- draw :: [(Int,Int)] -> IO ()
-draw vs = toFile (def) "test.svg" $
+draw name vs = toFile (def) (name ++ ".svg") $
   do
       layout_title .= "Title"
       plot (fillBetween "pl1" [ (x,(0,y)) | (x,y) <- vs])
