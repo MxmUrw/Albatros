@@ -15,8 +15,8 @@ module B_Parser
       Account(..),
       Config(..),
       YearMonth(..), mkDate,
-      yearMonthParser,
-      Charge(..), cAccount, cDate, cAmount
+      yearMonthParser, commaSep,
+      Charge(..), cAccount, cDate, cAmount, cTag
   )
   where
 
@@ -44,10 +44,10 @@ class Config c where
     getWorldAccount :: c -> String
     getAccounts :: c -> [String]
 
-newtype Account = Account { name :: String}
+newtype Account = Account { name :: T.Text}
   deriving (Eq, Ord)
 instance Show Account where
-    show (Account s) = "<" ++ s ++ ">"
+    show (Account s) = "<" ++ T.unpack s ++ ">"
 
 data Value = Absolute Int | Relative Int
   deriving (Show)
@@ -230,18 +230,18 @@ itemParser =
   where ex = Item
           <$> (Relative <$> monetaryValue)
           <*> accountParser
-          <*> (Account . getWorldAccount <$> getState)
+          <*> (Account . T.pack . getWorldAccount <$> getState)
           <*> stringLiteral
           <*> stringLiteral
         inc = Item
           <$> (Relative <$> monetaryValue)
-          <*> (Account . getWorldAccount <$> getState)
+          <*> (Account . T.pack . getWorldAccount <$> getState)
           <*> accountParser
           <*> stringLiteral
           <*> stringLiteral
         check = Item
           <$> (Absolute <$> monetaryValue)
-          <*> (Account . getWorldAccount <$> getState)
+          <*> (Account . T.pack . getWorldAccount <$> getState)
           <*> accountParser
           <*> pure "correction"
           <*> pure "correction"
@@ -260,7 +260,7 @@ accountParser =
       config <- getState
       let def      = getDefaultAccount config
       let explicit = try <$> angles <$> symbol <$> getAccounts config
-      Account <$> def `option` choice explicit
+      Account <$> T.pack <$> def `option` choice explicit
 
 
 -- lexer
@@ -296,6 +296,9 @@ monetaryValue = combine <$> P.naturalOrFloat lexer
   where
     combine (Left i) = fromIntegral i
     combine (Right r) = round r
+
+commaSep :: Parsec String u a -> Parsec String u [a]
+commaSep = P.commaSep lexer
 
 whiteSpace :: ParsecT String u Identity ()
 whiteSpace = P.whiteSpace lexer

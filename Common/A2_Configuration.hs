@@ -1,7 +1,7 @@
 
 module A2_Configuration
   (
-      Configuration(..), path, accounts,
+      Config(..), path, accounts,
       Accounts(..), main, others,
       readConf
   )
@@ -23,20 +23,20 @@ data Accounts = Accounts
 instance Interpret Accounts
 makeLenses ''Accounts
 
-data Configuration = Configuration
+data Config = Config
   {
       _path :: Text,
       _accounts :: Accounts
   }
   deriving (Generic, Show)
-instance Interpret Configuration
-makeLenses ''Configuration
+instance Interpret Config
+makeLenses ''Config
 
 
 
 --- Functions ---
 
-readConf :: IO Configuration
+readConf :: IO Config
 readConf = input auto "./config"
 
 

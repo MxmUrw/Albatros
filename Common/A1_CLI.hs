@@ -1,8 +1,11 @@
 
 module A1_CLI
   (
-      Args(..),
+      Args(..), aCommand, aOptions,
+      Command(..),
+      Options(..),
       Time(..),
+      Config(..),
       parse
   )
   where
@@ -14,31 +17,99 @@ import Text.Parsec hiding ((<|>), option, parse)
 import Options.Applicative
 import Data.Semigroup ((<>))
 import Data.Functor.Identity
+import Data.Text
 
 -- data Config = Full | Monthly
 --   deriving (Show)
 
+
+data Command = CmdList ListOptions | CmdView ViewOptions
+
+
+
+data ViewOptions = ViewOptions
+data ListOptions = ListOptions
+  {
+      target :: ListTarget
+  }
+data ListTarget = Tags | Charges
+
 data Time = TimeYearMonth PARS.YearMonth | TimeNow | TimeNone
+
+
+data Options = Options
+  {
+      begin :: Time,
+      end :: Time,
+      accounts :: [Text]
+  }
 
 data Args = Args
   {
-      begin :: Time,
-      end :: Time
+      _aCommand :: Command,
+      _aOptions :: Options
   }
+makeLenses ''Args
 
 
-parse :: IO Args
-parse = execParser parseCLI
+class Config c where
+    getAccounts :: c -> [Text]
 
-parseCLI :: ParserInfo Args
-parseCLI = info (parseConfig <**> helper)
+
+parse :: Config c => c -> IO Args
+parse c = execParser (parseCLI c)
+
+parseCLI :: Config c => c -> ParserInfo Args
+parseCLI c = info ((parseArgs c) <**> helper)
                 (fullDesc <> progDesc "View money" <> header "Albatros")
 
-parseConfig :: Parser Args
-parseConfig = Args <$> beginParser <*> endParser
+parseArgs :: Config c => c -> Parser Args
+parseArgs c = Args
+              <$> hsubparser
+                  (
+                      command "list" listInfo
+                      <> command "view" viewInfo
+                  )
+              <*> parseOptions c
+  where
+    listInfo = info cmdListParser (progDesc "List statistics")
+    viewInfo = info cmdViewParser (progDesc "View graphs")
+
+cmdListParser :: Parser Command
+cmdListParser = CmdList <$> listOptions
+
+cmdViewParser :: Parser Command
+cmdViewParser = CmdView <$> pure ViewOptions
+
+---------------------------------------------------------
+--- List options
+listOptions :: Parser ListOptions
+listOptions = ListOptions <$> (listTargetTags <|> listTargetCharges)
+
+listTargetTags :: Parser ListTarget
+listTargetTags = flag' Tags
+                 ( long "tags"
+                 <> help "list tags"
+                 )
+
+listTargetCharges :: Parser ListTarget
+listTargetCharges = flag' Charges
+                    ( long "charges"
+                    <> help "list charges"
+                    )
+
+
+---------------------------------------------------------
+--- General options
+parseOptions :: Config c => c -> Parser Options
+parseOptions c = Options
+            <$> beginParser
+            <*> endParser
+            <*> accountsParser c
+
 
 beginParser :: Parser Time
-beginParser = option readTime
+beginParser = option (readParsec timePsc)
               ( long "begin"
                 <> short 'b'
                 <> metavar "BEGIN"
@@ -47,7 +118,7 @@ beginParser = option readTime
               )
 
 endParser :: Parser Time
-endParser = option readTime
+endParser = option (readParsec timePsc)
             ( long "end"
               <> short 'e'
               <> metavar "END"
@@ -55,16 +126,34 @@ endParser = option readTime
               <> help "End at time END"
             )
 
+accountsParser :: Config c => c -> Parser [Text]
+accountsParser c = option (readParsec (accountsPsc c))
+                   ( long "accounts"
+                     <> short 'a'
+                     <> metavar "ACCOUNTS"
+                     <> value (getAccounts c)
+                     <> help "Charges are filtered by ACCOUNTS"
+                   )
 
 
-readTime :: ReadM Time
-readTime = eitherReader ((_Left%~show) . runIdentity . runParserT timeParser () "")
+------------------------------------------
+--- Single argument parsers
 
-timeParser :: ParsecT String u Identity Time
-timeParser =
+readParsec :: Parsec String () a -> ReadM a
+readParsec f = eitherReader ((_Left%~show) . runIdentity . runParserT f () "")
+
+accountsPsc :: Config c => c -> Parsec String u [Text]
+accountsPsc c = fmap pack <$> PARS.commaSep account
+  where account = choice $ try <$> PARS.symbol <$> unpack <$> getAccounts c
+
+timePsc :: ParsecT String u Identity Time
+timePsc =
     (TimeYearMonth <$> PARS.yearMonthParser)
     <|> (PARS.symbol "now" *> pure TimeNow)
     <|> (PARS.symbol "none" *> pure TimeNone)
+
+
+
 
 -- parseCLI' :: Parser Config
 -- parseCLI' = subparser
