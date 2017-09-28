@@ -16,7 +16,7 @@ module B_Parser
       Config(..),
       YearMonth(..), mkDate,
       yearMonthParser, commaSep,
-      Charge(..), cAccount, cDate, cAmount, cTag
+      Charge(..), cAccount, cDate, cAmount, cTag, cLabel
   )
   where
 

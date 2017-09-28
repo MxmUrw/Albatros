@@ -76,8 +76,11 @@ run =
             stats <- renderFull chrgs
             print $ prettyMap stats
         CLI.CmdList opts -> do
-            let tags = getTags <$> chrgs
-            print $ prettyMap tags
+            let printTarget =
+                  case opts^.CLI.listTarget of
+                    CLI.Tags    -> prettyMap (getTags <$> chrgs)
+                    CLI.Charges -> prettyMap chrgs
+            print printTarget
 
 
       -- render fncs =
@@ -195,8 +198,21 @@ instance Pretty Stats where
                    <> line
 
 prettyCorrected :: (LocalTime,Int) -> Doc ann
-prettyCorrected (date,val) = pretty (formatTime defaultTimeLocale "%F:" date) <+> pretty val
+prettyCorrected (date,val) = pretty date <> ":" <+> pretty val
 
+instance Pretty LocalTime where
+    pretty time = pretty $ formatTime defaultTimeLocale "%F" time
+
+instance Pretty PARS.Charge where
+    pretty (PARS.Charge date amount _ label tag) =
+        pretty amount
+        <+> "\t[" <> pretty date <> "]"
+        <+> pretty label
+        <+> "(" <> pretty tag <> ")"
+
+instance Pretty PARS.Value where
+    pretty (PARS.Relative r) = pretty r
+    pretty (PARS.Absolute a) = ":=" <> pretty a
 
 
 -- fullParse :: IO ()

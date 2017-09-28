@@ -4,6 +4,8 @@ module A1_CLI
       Args(..), aCommand, aOptions,
       Command(..),
       Options(..),
+      ListOptions(..), listTarget,
+      ListTarget(..),
       Time(..),
       Config(..),
       parse
@@ -26,13 +28,14 @@ import Data.Text
 data Command = CmdList ListOptions | CmdView ViewOptions
 
 
+data ListTarget = Tags | Charges
 
 data ViewOptions = ViewOptions
 data ListOptions = ListOptions
   {
-      target :: ListTarget
+      _listTarget :: ListTarget
   }
-data ListTarget = Tags | Charges
+makeLenses ''ListOptions
 
 data Time = TimeYearMonth PARS.YearMonth | TimeNow | TimeNone
 
