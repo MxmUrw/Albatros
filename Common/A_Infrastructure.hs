@@ -78,7 +78,7 @@ run =
         CLI.CmdList opts -> do
             let printTarget =
                   case opts^.CLI.listTarget of
-                    CLI.Tags    -> prettyMap (getTags <$> chrgs)
+                    CLI.Tags    -> prettyMap (sort <$> getTags <$> chrgs)
                     CLI.Charges -> prettyMap chrgs
             print printTarget
 

@@ -243,15 +243,15 @@ itemParser =
           <$> (Absolute <$> monetaryValue)
           <*> (Account . T.pack . getWorldAccount <$> getState)
           <*> accountParser
-          <*> pure "correction"
-          <*> pure "correction"
+          <*> pure "_Check_"
+          <*> pure "_Check_"
         move = Item
           <$> (Relative <$> monetaryValue)
           <*> accountParser
           <* symbol "to"
           <*> accountParser
-          <*> pure "move"
-          <*> pure "move"
+          <*> pure "_Move_"
+          <*> pure "_Move_"
 
 
 accountParser :: Config c => ParsecT String c Identity Account
