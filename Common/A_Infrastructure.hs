@@ -23,6 +23,7 @@ import Data.Either
 import Data.Ord
 import Data.List
 import Data.Time.LocalTime
+import Data.Time.Format
 import Data.Traversable
 import Data.Default
 import Data.Text.Prettyprint.Doc
@@ -32,12 +33,12 @@ import Data.Text.Prettyprint.Doc
 data Stats = Stats
   {
       _current :: Int,
-      _corrected :: Int
+      _corrected :: [(LocalTime,Int)]
   }
   deriving (Show)
 
 instance Default Stats where
-    def = Stats 0 0
+    def = Stats 0 []
 
 makeLenses ''Stats
 
@@ -136,19 +137,20 @@ renderFull args fncs =
 
   where
 
-      delta stats mov
+      delta acc mov
         | PARS.Absolute v <- value =
-              (stats & current.~v & corrected+~(abs (stats^.current - v)),
-               (date, v))
+              let acc' = acc & current.~v & corrected%~((date, v - acc^.current) :)
+              in (acc', (date, v))
         | PARS.Relative v <- value =
-              (stats & current+~v, (date, stats^.current + v))
+              let acc' = acc & current+~v
+                  val' = acc'^.current
+              in (acc', (date, val'))
         where
           date = mov^.PARS.cDate
           value = mov^.PARS.cAmount
 
       draw acc (stats,vals) = REND.draw (PARS.name acc) vals >> return stats
 
-                          
 
 
 
@@ -163,10 +165,12 @@ prettyStats :: Stats -> Doc ()
 prettyStats stats = vsep
                     [
                         "balance:" <+> pretty (stats^.current),
-                        "corrections:" <+> pretty (stats^.corrected)
+                        "corrections:" <+> list (prettyCorrected <$> stats^.corrected)
                     ]
                     <> line
 
+prettyCorrected :: (LocalTime,Int) -> Doc ()
+prettyCorrected (date,val) = pretty (formatTime defaultTimeLocale "%F:" date) <+> pretty val
 
 
 

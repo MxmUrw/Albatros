@@ -130,8 +130,10 @@ addCharges :: Movement -> Map.Map Account [Charge] -> Map.Map Account [Charge]
 addCharges
   (Movement date (Item value source target label tag))
   =
-    Map.insertWith (++) target [mkCharge value target]
-    . Map.insertWith (++) source [mkCharge (negate value) source]
+  case value of
+    Relative _ -> Map.insertWith (++) target [mkCharge value target]
+                 . Map.insertWith (++) source [mkCharge (negate value) source]
+    Absolute _ -> Map.insertWith (++) target [mkCharge value target]
   where
     mkCharge v a = Charge date v a label tag
     negate v = v & _Relative *~ (-1)
@@ -143,10 +145,16 @@ addCharges
 breakExItem :: ExItem -> [Item]
 breakExItem (ExItem item Nothing) = pure item
 breakExItem (ExItem item (Just (Split p dir acc))) =
-  [
-      item & value._Relative %~ reverseFrac p,
-      item & value._Relative %~ applyFrac p & splitAcc dir .~ acc
-  ]
+  case item^.value of
+    Relative _ ->
+      [
+          item & value._Relative %~ reverseFrac p,
+          item & value._Relative %~ applyFrac p & splitAcc dir .~ acc
+      ]
+    Absolute _ ->
+      [
+          item
+      ]
   where
     reverseFrac :: Percentage -> Int -> Int
     reverseFrac p v = v - applyFrac p v
