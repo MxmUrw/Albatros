@@ -99,7 +99,7 @@ run =
 handleError f x =
     do
         let (a,b) = partitionEithers x
-        _ <- f a
+        () <- f a
         return b
 
 putError e =

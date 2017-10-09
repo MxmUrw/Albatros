@@ -22,6 +22,7 @@ module B_Parser
 
 ---------------------------------------------------------------------
 ------ Imports ------
+import Text.Parsec.Prim (many)
 import Text.Parsec
 import Text.Parsec.Language (haskellStyle)
 import qualified Text.Parsec.Token as P
@@ -61,6 +62,7 @@ data Item = Item
       _iLabel :: T.Text,
       _tag :: T.Text
   }
+  deriving (Show)
 makeLenses ''Item
 
 data Movement = Movement
@@ -92,16 +94,21 @@ type Percentage = Int
 -- with format (Month y m [day, items])
 --          or [Recurrent item y1 m1 y2 m2]
 data Fnc1 = FncMonth YearMonth [(Int, [ExItem])] | FncRec [Recurrent]
+  deriving (Show)
 
 data ExItem = ExItem Item (Maybe Split)
+  deriving (Show)
 data Split = Split Percentage Direction Account
+  deriving (Show)
 
 data Direction = From | To
+  deriving (Show)
 
-data Recurrent = Recurrent ExItem YearMonth YearMonth
+data Recurrent = Recurrent ExItem YearMonth YearMonth Int
+  deriving (Show)
 
 data YearMonth = YearMonth Int Int
-  deriving (Eq)
+  deriving (Eq, Show)
 
 instance Ord YearMonth where
     (YearMonth y1 m1) <= (YearMonth y2 m2) = y1 < y2 || (y1 == y2 && m1 <= m2)
@@ -123,7 +130,7 @@ genMovements (FncMonth ym days) = travDay =<< days
 --     travDay (d, items) = Movement (mkDate ym d) <$> items
 genMovements (FncRec recs) = genRec =<< recs
   where
-    genRec (Recurrent i ym1 ym2) = Movement <$> enumMonthly ym1 ym2 <*> breakExItem i
+    genRec (Recurrent i ym1 ym2 d) = Movement <$> enumMonthly ym1 ym2 d <*> breakExItem i
 
 
 addCharges :: Movement -> Map.Map Account [Charge] -> Map.Map Account [Charge]
@@ -166,9 +173,9 @@ breakExItem (ExItem item (Just (Split p dir acc))) =
     splitAcc To = target
 
 
-enumMonthly :: YearMonth -> YearMonth -> [LocalTime]
-enumMonthly ym1 ym2
-  | ym1 < ym2 = mkDate ym1 1 : enumMonthly (nextYM ym1) ym2
+enumMonthly :: YearMonth -> YearMonth -> Int -> [LocalTime]
+enumMonthly ym1 ym2 d
+  | ym1 < ym2 = mkDate ym1 d : enumMonthly (nextYM ym1) ym2 d
   | otherwise = []
 
 nextYM :: YearMonth -> YearMonth
@@ -186,7 +193,7 @@ mkDate (YearMonth y m) d =
 
 fnc1Parser :: Config c => ParsecT String c Identity Fnc1
 fnc1Parser =
-  whiteSpace *> (month <|> recurrent)
+  whiteSpace *> (month <|> recurrent) <* eof
   where
     month =
       symbol "month" *>
@@ -207,6 +214,8 @@ recurrentParser =
                 <*> yearMonthParser
                 <* symbol "till"
                 <*> yearMonthParser
+                <* symbol "on"
+                <*> integer
 
 dayTreeParser :: Config c => ParsecT String c Identity (Int, [ExItem])
 dayTreeParser = symbol "day" *> ((,) <$> integer <*> many exItemParser)
@@ -214,7 +223,7 @@ dayTreeParser = symbol "day" *> ((,) <$> integer <*> many exItemParser)
 exItemParser :: Config c => ParsecT String c Identity ExItem
 exItemParser =
   do
-      item <- itemParser
+      item <- try itemParser
       option (ExItem item Nothing) (ExItem item . Just <$> brackets split)
   where
       split = symbol "split" *> (Split <$> percentage <*> direction <*> accountParser)
