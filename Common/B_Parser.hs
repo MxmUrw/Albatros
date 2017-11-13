@@ -33,6 +33,7 @@ import Data.Functor.Identity
 import qualified Data.Text as T
 import Data.Time.LocalTime
 import Data.Time.Calendar
+import Data.Decimal
 -- import Data.Percentage
 import qualified Data.Map.Strict as Map
 
@@ -50,7 +51,9 @@ newtype Account = Account { name :: T.Text}
 instance Show Account where
     show (Account s) = "<" ++ T.unpack s ++ ">"
 
-data Value = Absolute Int | Relative Int
+
+
+data Value = Absolute Decimal | Relative Decimal
   deriving (Show)
 makePrisms ''Value
 
@@ -90,7 +93,7 @@ makeLenses ''Charge
 
 
 
-type Percentage = Int
+type Percentage = Integer
 -- with format (Month y m [day, items])
 --          or [Recurrent item y1 m1 y2 m2]
 data Fnc1 = FncMonth YearMonth [(Int, [ExItem])] | FncRec [Recurrent]
@@ -153,21 +156,21 @@ breakExItem :: ExItem -> [Item]
 breakExItem (ExItem item Nothing) = pure item
 breakExItem (ExItem item (Just (Split p dir acc))) =
   case item^.value of
-    Relative _ ->
-      [
-          item & value._Relative %~ reverseFrac p,
-          item & value._Relative %~ applyFrac p & splitAcc dir .~ acc
-      ]
+    Relative dec -> (ix 0 . splitAcc dir .~ acc) $ ($ item) <$> (value._Relative .~) <$> allocate dec [ p , 100 - p]
+      -- [
+      --     item & value._Relative %~ reverseFrac p,
+      --     item & value._Relative %~ applyFrac p & splitAcc dir .~ acc
+      -- ]
     Absolute _ ->
       [
           item
       ]
   where
-    reverseFrac :: Percentage -> Int -> Int
-    reverseFrac p v = v - applyFrac p v
+    -- reverseFrac :: Percentage -> Int -> Int
+    -- reverseFrac p v = v - applyFrac p v
 
-    applyFrac :: Percentage -> Int -> Int
-    applyFrac p v = v * p `div` 100
+    -- applyFrac :: Percentage -> Int -> Int
+    -- applyFrac p v = v * p `div` 100
 
     splitAcc From = source
     splitAcc To = target
@@ -300,11 +303,11 @@ identifier = P.identifier lexer
 stringLiteral :: ParsecT String u Identity T.Text
 stringLiteral = T.pack <$> P.stringLiteral lexer
 
-monetaryValue :: ParsecT String u Identity Int
+monetaryValue :: ParsecT String u Identity Decimal
 monetaryValue = combine <$> P.naturalOrFloat lexer
   where
     combine (Left i) = fromIntegral i
-    combine (Right r) = round r
+    combine (Right r) = realFracToDecimal 2 r
 
 commaSep :: Parsec String u a -> Parsec String u [a]
 commaSep = P.commaSep lexer

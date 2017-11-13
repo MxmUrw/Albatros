@@ -30,13 +30,14 @@ import Data.Time.Format
 import Data.Traversable
 import Data.Default
 import Data.Text.Prettyprint.Doc
+import Data.Decimal
 
 ---------------------------------------
 ------ Data ------
 data Stats = Stats
   {
-      _current :: Int,
-      _corrected :: [(LocalTime,Int)]
+      _current :: Decimal,
+      _corrected :: [(LocalTime,Decimal)]
   }
   deriving (Show)
 
@@ -163,6 +164,8 @@ renderFull chrgs =
       Map.traverseWithKey draw statVals
 
   where
+      decimalToInt :: Decimal -> Integer
+      decimalToInt (Decimal p m) = m `div` (10 ^ p)
 
       delta acc mov
         | PARS.Absolute v <- value =
@@ -176,7 +179,7 @@ renderFull chrgs =
           date = mov^.PARS.cDate
           value = mov^.PARS.cAmount
 
-      draw acc (stats,vals) = REND.draw (PARS.name acc) vals >> return stats
+      draw acc (stats,vals) = REND.draw (PARS.name acc) ((_2 %~ decimalToInt) <$> vals) >> return stats
 
 
 
@@ -192,13 +195,13 @@ prettyMap map = vsep $ single <$> Map.toList map
 instance Pretty Stats where
     pretty stats = vsep
                    [
-                       "balance:" <+> pretty (stats^.current),
-                       "corrections:" <+> list (prettyCorrected <$> stats^.corrected)
+                       "balance:" <+> pretty (show (stats^.current)),
+                       "corrections:" <+> list (prettyCorrected <$> (stats^.corrected))
                    ]
                    <> line
 
-prettyCorrected :: (LocalTime,Int) -> Doc ann
-prettyCorrected (date,val) = pretty date <> ":" <+> pretty val
+prettyCorrected :: (LocalTime,Decimal) -> Doc ann
+prettyCorrected (date,val) = pretty date <> ":" <+> pretty (show val)
 
 instance Pretty LocalTime where
     pretty time = pretty $ formatTime defaultTimeLocale "%F" time
@@ -211,8 +214,8 @@ instance Pretty PARS.Charge where
         <+> "(" <> pretty tag <> ")"
 
 instance Pretty PARS.Value where
-    pretty (PARS.Relative r) = pretty r
-    pretty (PARS.Absolute a) = ":=" <> pretty a
+    pretty (PARS.Relative r) = pretty $ show r
+    pretty (PARS.Absolute a) = ":=" <> pretty (show a)
 
 
 -- fullParse :: IO ()
